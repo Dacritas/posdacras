@@ -14,6 +14,23 @@ jobs:
 
     runs-on: ubuntu-latest
 
+    # Step 2: MySQL service for the database
+    services:
+      mysql:
+        image: mysql:5.7
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: ospos
+          MYSQL_USER: ospos_user
+          MYSQL_PASSWORD: ospos_password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
     steps:
     - uses: actions/checkout@v4
 
@@ -38,6 +55,63 @@ jobs:
 
     - name: Install dependencies
       run: composer install --prefer-dist --no-progress
+
+    # Step 3: Execute database.sql to create the required tables
+    - name: Set up database schema
+      run: |
+        mysql -h 127.0.0.1 -u ospos_user -pospos_password ospos < app/Database/database.sql
+
+    # Step 5: Configure .env from .env.example with database credentials
+    - name: Configure .env file
+      run: |
+        cp .env.example .env
+        sed -i 's/^database.default.hostname.*/database.default.hostname = 127.0.0.1/' .env
+        sed -i 's/^database.default.database.*/database.default.database = ospos/' .env
+        sed -i 's/^database.default.username.*/database.default.username = ospos_user/' .env
+        sed -i 's/^database.default.password.*/database.default.password = ospos_password/' .env
+        sed -i 's/^database.default.port.*/database.default.port = 3306/' .env
+
+    # Step 8: Set CI_ENVIRONMENT to production for deployment artifact
+    - name: Set CI environment to production
+      run: |
+        sed -i 's/^# CI_ENVIRONMENT.*/CI_ENVIRONMENT = production/' .env || \
+        echo "CI_ENVIRONMENT = production" >> .env
+
+    # Create ZIP with all files needed to copy to the server
+    - name: Create deployment ZIP
+      run: |
+        zip -r ospos-deploy.zip . \
+          --exclude "*.git*" \
+          --exclude "*.github*" \
+          --exclude "tests/*" \
+          --exclude "*.env.example" \
+          --exclude "phpunit.xml*" \
+          --exclude "*.md"
+
+    # Create MySQL database backup
+    - name: Create database backup
+      run: |
+        mysqldump -h 127.0.0.1 -u ospos_user -pospos_password \
+          --single-transaction \
+          --routines \
+          --triggers \
+          ospos > ospos-database-backup.sql
+
+    # Upload deployment ZIP as artifact
+    - name: Upload deployment ZIP
+      uses: actions/upload-artifact@v4
+      with:
+        name: ospos-deploy
+        path: ospos-deploy.zip
+        retention-days: 7
+
+    # Upload database backup as artifact
+    - name: Upload database backup
+      uses: actions/upload-artifact@v4
+      with:
+        name: ospos-database-backup
+        path: ospos-database-backup.sql
+        retention-days: 7
 
     # Add a test script to composer.json, for instance: "test": "vendor/bin/phpunit"
     # Docs: https://getcomposer.org/doc/articles/scripts.md
