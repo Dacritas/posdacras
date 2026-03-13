@@ -56,6 +56,19 @@ jobs:
     - name: Install dependencies
       run: composer install --prefer-dist --no-progress
 
+    # Download latest official OSPOS release and extract database.sql
+    - name: Download latest OSPOS release and extract database.sql
+      run: |
+        RELEASE_URL=$(curl -s https://api.github.com/repos/opensourcepos/opensourcepos/releases/latest \
+          | grep "browser_download_url.*\.zip" \
+          | cut -d '"' -f 4 | head -n 1)
+        echo "Downloading release from: $RELEASE_URL"
+        curl -L "$RELEASE_URL" -o ospos-release.zip
+        unzip -o ospos-release.zip -d ospos-release/
+        find ospos-release/ -name "database.sql" -exec cp {} app/Database/database.sql \;
+        echo "database.sql found and copied:"
+        ls -lh app/Database/database.sql
+
     # Step 3: Execute database.sql to create the required tables
     - name: Set up database schema
       run: |
@@ -77,15 +90,13 @@ jobs:
         sed -i 's/^# CI_ENVIRONMENT.*/CI_ENVIRONMENT = production/' .env || \
         echo "CI_ENVIRONMENT = production" >> .env
 
-    # Create ZIP with all files needed to copy to the server
+    # Create ZIP with all files needed to copy to the server (from official release)
     - name: Create deployment ZIP
       run: |
-        zip -r ospos-deploy.zip . \
+        zip -r ospos-deploy.zip ospos-release/ \
           --exclude "*.git*" \
-          --exclude "*.github*" \
-          --exclude "tests/*" \
-          --exclude "*.env.example" \
-          --exclude "phpunit.xml*" \
+          --exclude "*/.github/*" \
+          --exclude "*/tests/*" \
           --exclude "*.md"
 
     # Create MySQL database backup
